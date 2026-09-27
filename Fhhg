@@ -1,0 +1,175 @@
+-- [[ เมนูเปิด-ปิด ระบบทำนายจุดตกบอลล่วงหน้าทันที (ฉบับแก้ไขสมบูรณ์) ]] --
+local Players = game:GetService("Players")
+local Workspace = game:GetService("Workspace")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local Debris = game:GetService("Debris")
+
+local player = Players.LocalPlayer
+local playerGui = player:WaitForChild("PlayerGui")
+
+-- ⚙️ ส่วนตั้งค่า (ปรับค่าแกน Y ของพื้นสนามตรงนี้)
+local FLOOR_HEIGHT = 0 
+local BALL_NAME = "Ball" 
+
+-- ตัวแปรสถานะ เปิด/ปิด ระบบทำนาย
+local isPredictorEnabled = true
+
+----------------------------------------------------------------
+-- [ส่วนที่ 1: สร้างเมนู GUI บนหน้าจอ]
+----------------------------------------------------------------
+local screenGui = Instance.new("ScreenGui")
+screenGui.Name = "BallPredictorMenu"
+screenGui.ResetOnSpawn = false
+screenGui.Parent = playerGui
+
+-- สร้างหน้าต่างเมนูหลัก (Main Frame)
+local mainFrame = Instance.new("Frame")
+mainFrame.Name = "MainFrame"
+mainFrame.Size = UDim2.new(0, 220, 0, 100) -- แก้ไขบั๊กตัวแปรพิมพ์เกินเรียบร้อย
+mainFrame.Position = UDim2.new(0, 20, 0, 20) -- ตําแหน่งมุมบนซ้ายของจอ
+mainFrame.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+mainFrame.BorderSizePixel = 0
+mainFrame.Active = true
+mainFrame.Draggable = true -- คลิกเมาส์ค้างเพื่อลากย้ายหน้าต่างได้
+mainFrame.Parent = screenGui
+
+-- ใส่ความโค้งมนให้เมนู
+local uiCorner = Instance.new("UICorner")
+uiCorner.CornerRadius = UDim.new(0, 8)
+uiCorner.Parent = mainFrame
+
+-- หัวข้อเมนู (Title)
+local titleLabel = Instance.new("TextLabel")
+titleLabel.Name = "Title"
+titleLabel.Size = UDim2.new(1, 0, 0, 35)
+titleLabel.BackgroundTransparency = 1
+titleLabel.Text = "Volleyball Predictor"
+titleLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+titleLabel.Font = Enum.Font.GothamBold
+titleLabel.TextSize = 14
+titleLabel.Parent = mainFrame
+
+-- ปุ่มเปิด-ปิด (Toggle Button)
+local toggleButton = Instance.new("TextButton")
+toggleButton.Name = "ToggleButton"
+toggleButton.Size = UDim2.new(0, 180, 0, 40)
+toggleButton.Position = UDim2.new(0.5, -90, 0.5, -5)
+toggleButton.BackgroundColor3 = Color3.fromRGB(46, 204, 113) -- เริ่มต้นสีเขียว
+toggleButton.Text = "สถานะ: เปิดใช้งาน"
+toggleButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+toggleButton.Font = Enum.Font.GothamBold
+toggleButton.TextSize = 13
+toggleButton.Parent = mainFrame
+
+local btnCorner = Instance.new("UICorner")
+btnCorner.CornerRadius = UDim.new(0, 6)
+btnCorner.Parent = toggleButton
+
+-- คำแนะนำด้านล่างเมนู
+local hintLabel = Instance.new("TextLabel")
+hintLabel.Size = UDim2.new(1, 0, 0, 20)
+hintLabel.Position = UDim2.new(0, 0, 1, -20)
+hintLabel.BackgroundTransparency = 1
+hintLabel.Text = "กดปุ่ม 'M' เพื่อซ่อน/แสดงเมนูนี้"
+hintLabel.TextColor3 = Color3.fromRGB(150, 150, 150)
+hintLabel.Font = Enum.Font.Gotham
+hintLabel.TextSize = 10
+hintLabel.Parent = mainFrame
+
+-- ฟังก์ชันเมื่อกดคลิกปุ่มเปิด/ปิดบนเมนู
+toggleButton.MouseButton1Click:Connect(function()
+	isPredictorEnabled = not isPredictorEnabled
+	if isPredictorEnabled then
+		toggleButton.BackgroundColor3 = Color3.fromRGB(46, 204, 113) -- เปลี่ยนสีเขียว
+		toggleButton.Text = "สถานะ: เปิดใช้งาน"
+	else
+		toggleButton.BackgroundColor3 = Color3.fromRGB(231, 76, 60) -- เปลี่ยนสีแดง
+		toggleButton.Text = "สถานะ: ปิดใช้งาน"
+		-- ลบวงกลมจุดตกบนพื้นออกทันทีหากเปิดอยู่
+		local oldMarker = Workspace:FindFirstChild("InstantBallTarget")
+		if oldMarker then oldMarker:Destroy() end
+	end
+end)
+
+-- ฟังก์ชันซ่อนหรือแสดงหน้าต่างเมนูด้วยการกดปุ่ม M บนคีย์บอร์ด
+UserInputService.InputBegan:Connect(function(input, gameProcessed)
+	if gameProcessed then return end
+	if input.KeyCode == Enum.KeyCode.M then
+		mainFrame.Visible = not mainFrame.Visible
+	end
+end)
+
+----------------------------------------------------------------
+-- [ส่วนที่ 2: ระบบคำนวณฟิสิกส์จุดตกบอลล่วงหน้า]
+----------------------------------------------------------------
+local function spawnLandingMarker(position)
+	if not isPredictorEnabled then return end -- หากปิดระบบอยู่ จะไม่สปอว์นวงกลม
+
+	local oldMarker = Workspace:FindFirstChild("InstantBallTarget")
+	if oldMarker then oldMarker:Destroy() end
+
+	local marker = Instance.new("Part")
+	marker.Name = "InstantBallTarget"
+	marker.Shape = Enum.PartType.Cylinder
+	marker.Size = Vector3.new(0.2, 5, 5) 
+	marker.Rotation = Vector3.new(0, 0, 90) 
+	marker.Position = Vector3.new(position.X, FLOOR_HEIGHT + 0.05, position.Z)
+	marker.Anchored = true
+	marker.CanCollide = false
+	marker.CanTouch = false
+	marker.CanQuery = false
+	marker.Material = Enum.Material.Neon
+	marker.Color = Color3.fromRGB(255, 60, 60) 
+	marker.Transparency = 0.4 
+	marker.Parent = Workspace
+	
+	Debris:AddItem(marker, 3.5) -- ตั้งเวลาลบวงกลมออกหลังจาก 3.5 วินาที
+end
+
+local function predictInstantLanding(ball)
+	local startPos = ball.Position
+	local velocity = ball.AssemblyLinearVelocity 
+	local gravity = Workspace.Gravity 
+	
+	if velocity.Magnitude < 5 then return end
+	
+	local a = -0.5 * gravity
+	local b = velocity.Y
+	local c = startPos.Y - FLOOR_HEIGHT
+	local discriminant = (b * b) - (4 * a * c)
+	
+	if discriminant >= 0 then
+		local t = (-b - math.sqrt(discriminant)) / (2 * a)
+		if t > 0 then
+			local finalX = startPos.X + (velocity.X * t)
+			local finalZ = startPos.Z + (velocity.Z * t)
+			local landingPosition = Vector3.new(finalX, FLOOR_HEIGHT, finalZ)
+			
+			spawnLandingMarker(landingPosition)
+		end
+	end
+end
+
+-- ลูปดักจับฟิสิกส์แรงปะทะลูกบอล
+task.spawn(function()
+	local lastVelocity = Vector3.zero
+	while true do
+		-- ดึงอ็อบเจกต์ลูกบอลใน Workspace (ตรวจจับทั้งชื่อ Ball หรือ Volleyball)
+		local ball = Workspace:FindFirstChild(BALL_NAME) or Workspace:FindFirstChild("Volleyball")
+		if ball and ball:IsA("BasePart") then
+			local currentVelocity = ball.AssemblyLinearVelocity
+			-- ตรวจจับแรงกระแทกเมื่อบอลเปลี่ยนทิศทางกะทันหัน
+			if math.abs(currentVelocity.Y - lastVelocity.Y) > 8 then
+				RunService.Heartbeat:Wait()
+				if isPredictorEnabled then
+					predictInstantLanding(ball)
+				end
+			end
+			lastVelocity = ball.AssemblyLinearVelocity
+		end
+		task.wait(0.05)
+	end
+end)
+
+print("ระบบแก้ไขบั๊ก เมนู UI + Instant Ball Predictor พร้อมทำงานแล้ว!")
